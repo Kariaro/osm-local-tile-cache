@@ -1,0 +1,160 @@
+<html>
+<head>
+
+<link rel="stylesheet" href="scripts/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="scripts/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<style>
+body { margin: 0px; }
+#map { height: 100%; margin: 0px; }
+#fixed { position: fixed; left: 50px; top: 10px; z-index: 9999; }
+</style>
+
+</head>
+<body>
+
+<div id="map"></div>
+
+<script>
+
+// https://leaflet-extras.github.io/leaflet-providers/preview/
+
+var map = L.map('map').setView([0, 0], 0);
+
+const tile_provider = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const tile_fetching = false;
+const tile_levels = 6;
+
+const loaded_tiles = new Map();
+const rectangles = new Map();
+
+function as_key(coords) {
+	return coords.x + ',' + coords.y + ',' + coords.z;
+}
+
+if (tile_fetching) {	
+	/*
+	var osm = L.tileLayer(tile_provider, {
+		maxZoom: 9,
+		attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+		noWrap: true,
+		crossOrigin: '*',
+	}).addTo(map);
+	*/
+
+	var osm = new (L.TileLayer.extend({
+		getTileUrl: function(coords) {
+			let size = Math.pow(2, coords.z) - 1;
+			if (coords.x < 0 || coords.y < 0 || coords.x > size || coords.y > size || coords.z > tile_levels) {
+				return '';
+			}
+			if (loaded_tiles.has(as_key(coords))) {
+				return "/files/" + coords.x + "_" + coords.y + "_" + coords.z + ".jpg";
+			}
+			return L.TileLayer.prototype.getTileUrl.call(this, coords);
+		}
+	}))(tile_provider, {
+		maxZoom: 9,
+		attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+		noWrap: true,
+		crossOrigin: '*',
+	}).addTo(map);
+
+	osm.on('tileload', function (e) {
+		max = Math.pow(2, e.coords.z)
+		if (e.coords.x < 0 || e.coords.y < 0) return;
+		if (e.coords.x >= max || e.coords.y >= max) return;
+		if (loaded_tiles.has(as_key(e.coords))) return;
+		if (e.coords.z > tile_levels) return;
+		
+		var canvas = document.createElement('canvas');
+		var context = canvas.getContext('2d');
+		var img = e.tile;
+		canvas.height = img.naturalHeight;
+		canvas.width = img.naturalWidth;
+		context.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+		var base64String = canvas.toDataURL('image/png');
+		
+		// Update tile
+		loaded_tiles.set(as_key(e.coords), {
+			base64String: base64String,
+			inspect: function(depth, opts) { return ''; }
+		});
+		let rect = rectangles.get(as_key(e.coords));
+		if (rect) map.removeLayer(rect);
+	});
+
+	function get_lat_lng_for_number(xtile, ytile, zoom) {
+		let n = Math.pow(2.0, zoom);
+		let lng = xtile / n * 360.0 - 180.0;
+		let lat_rad = Math.atan(Math.sinh(Math.PI * (1 - 2.0 * ytile / n)));
+		let lat = 180.0 * lat_rad / Math.PI;
+		return [lat, lng];
+	}
+
+	for (let z = 0; z < tile_levels + 1; z += 1) {
+		let p = Math.pow(2, z);
+		for (let x = 0; x < p; x += 1) {
+			for (let y = 0; y < p; y += 1) {
+				let rect = L.rectangle([
+					get_lat_lng_for_number(x + 0.05, y + 0.05, z),
+					get_lat_lng_for_number(x + 0.95, y + 0.95, z)
+				], {color: "#ff7800", weight: 1});
+				rectangles.set(as_key({x: x, y: y, z: z}), rect);
+				rect.addTo(map);
+			}
+		}
+	}
+} else {
+	L.tileLayer('/files/{x}_{y}_{z}.jpg', {
+		maxZoom: 9,
+		attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+		noWrap: true
+	}).addTo(map);
+}
+
+function save_local() {
+	if (!tile_fetching) {
+		alert("No tiles");
+		return;
+	}
+	var data = [];
+	loaded_tiles.forEach(function(value, key) {
+		data.push(key);
+		data.push(value.base64String);
+	});
+	console.log(data);
+	const a = document.createElement('a');
+	document.body.appendChild(a);
+	const url = window.URL.createObjectURL(new Blob([data.join("#")], { type: 'data:attachment/text' }));
+	a.href = url;
+	a.download = 'tiles.txt';
+	a.click();
+}
+
+function save_server() {
+	if (!tile_fetching) {
+		alert("No tiles");
+		return;
+	}
+	loaded_tiles.forEach(function(value, key) {
+		var coords = key.split(',');
+		console.log(coords);
+		var xhr = new XMLHttpRequest();
+		xhr.open("POST", "/api/tile/" + coords[0] + "/" + coords[1] + "/" + coords[2], true);
+		xhr.setRequestHeader('Content-Type', 'data:image/png;base64');
+		xhr.send(value.base64String);
+	});
+}
+
+
+</script>
+
+<div id="fixed">
+<button onclick="save_server()">Save Tiles Server</button>
+<button onclick="save_local()">Save Tiles List TXT</button>
+</div>
+
+</body>
+</html>
+
