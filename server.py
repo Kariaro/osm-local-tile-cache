@@ -4,10 +4,57 @@ import base64
 import io
 import os
 from PIL import Image
+import lxml.html as LH
+
+if True:
+    def escape(c):
+        if c.isprintable() or c == '\r' or c == '\n' or c == '\t':
+            return c
+        c = ord(c)
+        if c <= 0xff:
+            return r'\x{0:02x}'.format(c)
+        elif c <= '\uffff':
+            return r'\u{0:04x}'.format(c)
+        else:
+            return r'\U{0:08x}'.format(c)
+    xml = LH.parse("index.html")
+    root = xml.getroot()
+    for elm in root.findall(".//link"):
+        with open(elm.attrib['href'], 'r', encoding='utf-8') as f:
+            new_elm = LH.Element("style")
+            new_elm.text = ''.join(escape(c) for c in f.read())
+            p = elm.getparent()
+            p.insert(p.index(elm), new_elm)
+            p.remove(elm)
+    for elm in root.findall(".//script"):
+        if not 'src' in elm.attrib:
+            continue
+        with open(elm.attrib['src'], 'r', encoding='utf-8') as f:
+            content = ''.join(escape(c) for c in f.read())
+            new_elm = LH.Element("script")
+            new_elm.text = content
+            p = elm.getparent()
+            p.insert(p.index(elm), new_elm)
+            p.remove(elm)
+
+    with open('dist/page.html', 'wb') as f:
+        xml.write(f, method='html', encoding='utf-8')
 
 PORT = 8000
 
-class Handler(http.server.SimpleHTTPRequestHandler):
+Handler = http.server.SimpleHTTPRequestHandler
+Handler.extensions_map = {
+    '.manifest': 'text/cache-manifest',
+    '.html': 'text/html',
+    '.png': 'image/png',
+    '.jpg': 'image/jpg',
+    '.svg':	'image/svg+xml',
+    '.css':	'text/css',
+    '.js':	'application/x-javascript',
+    '': 'application/octet-stream', # Default
+}
+
+class Handler(Handler):
     def __init__(self, *args, **kwargs):
         self.old_GET = super().do_GET
         super().__init__(*args, **kwargs)
